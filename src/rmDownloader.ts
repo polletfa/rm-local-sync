@@ -8,12 +8,12 @@ const BASE_URL = 'http://10.11.99.1';
 /**
  * Method for requesting the manifest of a collection
  */
-const MANIFEST = 'documents';
+const REQUEST_MANIFEST = {url: BASE_URL+'/documents/${ID}', method: "POST"};
 
 /**
  * Method for downloading a file
  */
-const DOWNLOAD = 'download';
+const REQUEST_DOWNLOAD = {url: BASE_URL+'/download/${ID}/placeholder', method: "GET"};
 
 /**
  * Partial type of a manifest item as provided by the reMarkable device
@@ -95,7 +95,7 @@ export class rmDownloader {
       }
       collections = newCollections;
     }
-    return files;
+    return files.sort((a,b) => a.path < b.path ? -1 : 1);
   }
 
   /**
@@ -107,7 +107,7 @@ export class rmDownloader {
    */
   private async getCollectionManifest(path: string, id: string): Promise<FileMetadata[]> {
     return new Promise((resolve, reject) => {
-      http.get([BASE_URL, MANIFEST, id].join("/"), {method: "POST"}, async res => {
+      http.get(REQUEST_MANIFEST.url.replace("${ID}", id), {method: REQUEST_MANIFEST.method}, async res => {
         let data = "";
         res.on('data', chunk => {
           data += chunk;
@@ -123,6 +123,27 @@ export class rmDownloader {
                 modified: i.ModifiedClient
               };
             }));
+          } catch(err) {
+            reject(err);
+          }
+        });
+      }).on('error', err => {
+        reject(err);
+      });
+    });
+  }
+
+  public async downloadFile(id: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      http.get(REQUEST_DOWNLOAD.url.replace("${ID}", id), {method: REQUEST_DOWNLOAD.method}, async res => {
+        let data = "";
+        res.on('data', chunk => {
+          data += chunk;
+        });
+
+        res.on('end', async () => {
+          try {
+            resolve(data);
           } catch(err) {
             reject(err);
           }
