@@ -1,4 +1,5 @@
 import * as http from 'http';
+import { FileMetadata } from './Application';
 
 /**
  * Base URL for all requests
@@ -22,17 +23,8 @@ type rmFileMetadata = {
   VissibleName: string,
   Type: "DocumentType"|"CollectionType",
   ID: string,
-  ModifiedClient: string
-};
-
-/**
- * Type describing a file or folder
- */
-export type FileMetadata = {
-  path: string,
-  type: "file"|"folder",
-  id: string,
-  modified: string
+  ModifiedClient: string,
+  sizeInBytes: string
 };
 
 /**
@@ -44,15 +36,10 @@ export class rmDownloader {
   /**
    * Retrieve metadata for all files on the device
    */
-  public async retrieveAllFiles(): Promise<boolean> {
+  public async retrieveAllFiles(): Promise<void> {
     return this.getAllFilesFromCollection("/","")
       .then((res) => {
         this.files = res;
-        return true;
-      })
-      .catch((err) => {
-        console.log("An error occurred: " + (err instanceof Error ? err.message : err));
-        return false;
       });
   }
 
@@ -81,19 +68,23 @@ export class rmDownloader {
     const files: FileMetadata[] = [];
     let collections: FileMetadata[] = [{path: path, type: "folder", id: id, modified: ""}];
 
-    while(collections.length > 0) {
-      const newCollections: FileMetadata[] = [];
-      for(const collection of collections) {
-        const manifest = await this.getCollectionManifest(collection.path, collection.id);
-        for(const item of manifest) {
-          if(item.type == "file") {
-            files.push(item);
-          } else {
-            newCollections.push(item);
+    try {
+      while(collections.length > 0) {
+        const newCollections: FileMetadata[] = [];
+        for(const collection of collections) {
+          const manifest = await this.getCollectionManifest(collection.path, collection.id);
+          for(const item of manifest) {
+            if(item.type == "file") {
+              files.push(item);
+            } else {
+              newCollections.push(item);
+            }
           }
         }
+        collections = newCollections;
       }
-      collections = newCollections;
+    } catch(err) {
+      Promise.reject(err);
     }
     return files.sort((a,b) => a.path < b.path ? -1 : 1);
   }
@@ -120,11 +111,12 @@ export class rmDownloader {
                 path: path + this.encodeName(i.VissibleName) + (i.Type == "DocumentType" ? ".pdf" : "/"),
                 type: i.Type == "DocumentType" ? "file" : "folder",
                 id: i.ID,
-                modified: i.ModifiedClient
+                modified: i.ModifiedClient,
+                size: i.Type == "DocumentType" ? Number(i.sizeInBytes) : undefined
               };
             }));
           } catch(err) {
-            reject(err);
+            reject(new Error("Invalid response"));
           }
         });
       }).on('error', err => {
@@ -133,17 +125,24 @@ export class rmDownloader {
     });
   }
 
-  public async downloadFile(id: string): Promise<string> {
+  /**
+   * Download a file from the device
+   */
+  public async downloadFile(file: FileMetadata): Promise<string> {
     return new Promise((resolve, reject) => {
-      http.get(REQUEST_DOWNLOAD.url.replace("${ID}", id), {method: REQUEST_DOWNLOAD.method}, async res => {
+      http.get(REQUEST_DOWNLOAD.url.replace("${ID}", file.id), {method: REQUEST_DOWNLOAD.method}, async res => {
         let data = "";
         res.on('data', chunk => {
           data += chunk;
         });
-
+        
         res.on('end', async () => {
           try {
-            resolve(data);
+            if(data.length != file.size || data.startsWith("%PDF")) {
+              resolve(data);
+            } else {
+              reject(new Error("Invalid data"));
+            }
           } catch(err) {
             reject(err);
           }

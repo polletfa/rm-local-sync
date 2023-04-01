@@ -1,5 +1,5 @@
 import * as fs from 'fs';
-import { FileMetadata } from './rmDownloader';
+import { FileMetadata } from './Application';
 
 /**
  * Path to the cache
