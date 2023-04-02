@@ -1,5 +1,5 @@
 import * as http from 'http';
-import { FileMetadata } from './Application';
+import { FileMetadata } from './types';
 
 /**
  * Base URL for all requests
@@ -23,8 +23,7 @@ type rmFileMetadata = {
   VissibleName: string,
   Type: "DocumentType"|"CollectionType",
   ID: string,
-  ModifiedClient: string,
-  sizeInBytes: string
+  ModifiedClient: string
 };
 
 /**
@@ -37,10 +36,12 @@ export class rmDownloader {
    * Retrieve metadata for all files on the device
    */
   public async retrieveAllFiles(): Promise<void> {
-    return this.getAllFilesFromCollection("/","")
-      .then((res) => {
-        this.files = res;
-      });
+    try {
+      this.files = await this.getAllFilesFromCollection("/","");
+    } catch(err) {
+      console.error("Error: Could not retrieve file list from device");
+      throw err;
+    }
   }
 
   /**
@@ -84,7 +85,8 @@ export class rmDownloader {
         collections = newCollections;
       }
     } catch(err) {
-      Promise.reject(err);
+      console.error("Error: Could not read collection "+path);
+      throw err;
     }
     return files.sort((a,b) => a.path < b.path ? -1 : 1);
   }
@@ -111,15 +113,16 @@ export class rmDownloader {
                 path: path + this.encodeName(i.VissibleName) + (i.Type == "DocumentType" ? ".pdf" : "/"),
                 type: i.Type == "DocumentType" ? "file" : "folder",
                 id: i.ID,
-                modified: i.ModifiedClient,
-                size: i.Type == "DocumentType" ? Number(i.sizeInBytes) : undefined
+                modified: i.ModifiedClient
               };
             }));
           } catch(err) {
-            reject(new Error("Invalid response"));
+            console.error("Error: Invalid response (could not parse JSON). Response starts with: "+data.substr(0,10));
+            reject(err);
           }
         });
-      }).on('error', err => {
+      }).on('error', (err) => {
+        console.error("Error: Could not establish a connection to the device.");
         reject(err);
       });
     });
@@ -128,26 +131,28 @@ export class rmDownloader {
   /**
    * Download a file from the device
    */
-  public async downloadFile(file: FileMetadata): Promise<string> {
+  public async downloadFile(file: FileMetadata): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       http.get(REQUEST_DOWNLOAD.url.replace("${ID}", file.id), {method: REQUEST_DOWNLOAD.method}, async res => {
-        let data = "";
+        let data: Buffer[] = [];
         res.on('data', chunk => {
-          data += chunk;
+          data.push(chunk);
         });
         
         res.on('end', async () => {
-          try {
-            if(data.length != file.size || data.startsWith("%PDF")) {
-              resolve(data);
-            } else {
-              reject(new Error("Invalid data"));
-            }
-          } catch(err) {
-            reject(err);
+          const buffer = Buffer.concat(data);
+          if(data.length == 0) {
+            console.error(`Error: No data received`);
+            reject(new Error("No data received"));
+          } else if(!data[0].toString().startsWith("%PDF")) {
+            console.error(`Error: Received invalid data from device. Data starts with: ${data[0].toString().substr(0,10)}`);
+            reject(new Error("Invalid data: not a PDF"));
+          } else {
+            resolve(buffer);
           }
         });
       }).on('error', err => {
+        console.log("Error: could not establish a connection to the device.");
         reject(err);
       });
     });
